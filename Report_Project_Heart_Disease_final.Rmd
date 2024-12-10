@@ -1,0 +1,975 @@
+---
+title: "HarvardX Data Science Part 9: Own Project - Heart Disease Prediction"
+author: "Joerg Schors"
+output:
+  pdf_document: 
+    toc: true
+    toc_depth: 4
+    fig_width: 6
+    fig_height: 4
+    fig_caption: true
+    number_sections: true
+  html_document: 
+    toc: true
+    toc_depth: 4
+    number_sections: true
+---
+
+```{r setup, include=FALSE, message=FALSE, warning=FALSE}
+# load libraries
+if(!require(gtools)) install.packages("gtools", repos = "http://cran.us.r-project.org")
+if(!require(ggplot2)) install.packages("ggplot2", repos = "http://cran.us.r-project.org")
+if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
+if(!require(dplyr)) install.packages("dplyr", repos = "http://cran.us.r-project.org")
+if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
+if(!require(purrr)) install.packages("purrr", repos = "http://cran.us.r-project.org")
+if(!require(broom)) install.packages("broom", repos = "http://cran.us.r-project.org")
+if(!require(gridExtra)) install.packages("gridExtra", repos = "http://cran.us.r-project.org")
+if(!require(lattice)) install.packages("lattice", repos = "http://cran.us.r-project.org")
+if(!require(GGally)) install.packages("GGally", repos = "http://cran.us.r-project.org")
+if(!require(gam)) install.packages("gam", repos = "http://cran.us.r-project.org")
+if(!require(randomForest)) install.packages("randomForest", repos = "http://cran.us.r-project.org")
+
+# The library "stringr" for string manipulation is loaded via dependencies due to the library "tidyverse"
+
+options(digits = 5) # Number of significant digits in numerical results
+
+knitr::opts_chunk$set(echo = TRUE)
+
+# prepare actual date to print (European Format)
+AktDatum <- ymd(today())
+AktDatumS <- sprintf("%d.%d.%d", day(AktDatum), month(AktDatum), year(AktDatum))
+```
+
+Final version **`r AktDatumS`**
+
+# Executive Summary
+
+This report describes the development of a Machine Learning (ML) model for a data set freely available with 1190 observations containing 11 different variables and one "result" called *target*. The *target* states, if the observation (i.e. a person) suffers from heart disease or not. The variables are a combination of continuous and nominal (factorial) values most probably taken during a medical examination with exercise and in combination with the record of a Electrocardiogram (ECG).
+
+The data set was thoroughly inspected with respect to missing or non plausible values, which have been corrected to a certain extent. Data analysis has been performed to find correlations or patterns in the combination of different variables. Stratification has been used to reduce complexity of one variable (*age*).
+
+To find patterns, a large set of graphical representations of the data in different combination has been created, but has not lead to a definite conclusion which approach for the ML model would be convenient.
+
+At least five different models, one simply by guessing, k-Nearest Neighbors, two generalized linear models (glm & GAM loess) and a Random Forest algorithm (two different models) have been evaluated on the basis of the accuracy as criterium for the best model.
+
+The conclusion is, that a Random Forest model (*rf*) with optimized parameters gives the highest accuracy of about 0.91, while *cforest* gives an accuracy of only 0.86.
+
+All steps will be described in detail in the following sections.
+
+# Introduction
+
+This is the own ML project to complete the HarvardX Data Science Course Series. After a long research (also on different governmental data platforms) which data could I use as a final project I choose a dataset from *www.kaggle.com*, because I can not use data from my own business.
+
+The data analysis and model building was done using R [1] with RStudio [2] as IDE using techniques and approaches as described in the course script [3]. Reference [4] was used for additional information.
+
+# Description of the Data
+
+## Data set information
+
+The data set is available for download from *www.kaggle.com* (see: *https://www.kaggle.com/datasets/mexwell/heart-disease-dataset*). It consists of eleven different attributes that may possibly have influence on a heart disease and the health status (i.e. heart disease or not, labeled as *target*).
+
+The provider of the data stated:
+
+*This heart disease dataset is curated by combining five popular heart disease datasets already available independently but not combined before. In this dataset, the five heart datasets are combined which makes it the largest heart disease dataset available so far for research purposes. The five datasets used for its curation are:*
+
+•	*Cleveland*
+
+•	*Hungarian*
+
+•	*Switzerland*
+
+•	*Long Beach VA*
+
+•	*Statlog (Heart) Data Set*
+
+## Detailed data description
+
+The detailed description of the variables is given below:
+
+S.No.  |Attribute  |Code given  |Unit  |Data type
+-------|-----------|------------|------|---------
+1|age  |Age  |in years  |Numeric  
+2|sex  |Sex  |1, 0   |Binary  
+3|chest pain type  |chest pain type  |1,2,3,4  |Nominal  
+4|resting blood pressure  |resting bp s  |in mm Hg  |Numeric  
+5|serum cholesterol  |cholesterol  |in mg/dl  |Numeric  
+6|fasting blood sugar  |fasting blood sugar  |1,0 > 120 mg/dl  |Binary  
+7|resting electrocardiogram results  |resting ecg  |0,1,2  |Nominal  
+8|maximum heart rate achieved  |max heart rate  |71–202  |Numeric  
+9|exercise induced angina  |exercise angina  |0,1  |Binary  
+10|oldpeak =ST  |oldpeak  |depression  |Numeric  
+11|the slope of the peak exercise ST segment  |ST slope  |0,1,2  |Nominal  
+12|class  |target  |0,1  |Binary 
+
+A more detailed description of the "nominal" values, i.e. categorial values is given in the table below. The meaning, i.e. background and importance with respect to heart disease can be found in literature (see for example references [5] to [7]). Some of these aspects will be described below with respect to the data analysis and model building.
+
+Attribute  |Description
+-----------|---------------
+Sex  |"1 = male / 0= female"
+Chest Pain Type  |-- Value 1: typical angina  
+|   |-- Value 2: atypical angina  
+|   |-- Value 3: non-anginal pain 
+|   |-- Value 4: asymptomatic  
+Fasting Blood  sugar  | > 120 mg/dl (1 = true; 0 = false)
+Resting  electrocardiogram results  |-- Value 0: normal  
+|   |-- Value 1: having ST-T wave abnormality (T wave inversions and/or ST elevation or depression of > 0.05 mV)  
+|   |-- Value 2: showing probable or definite left ventricular  hypertrophy by Estes' criteria  
+Exercise induced angina  |"1 = yes / 0 = no "
+the slope of the peak exercise ST segment  |-- Value 1: upsloping  
+|   |-- Value 2: flat  
+|   |-- Value 3: downsloping  
+class  |1 = heart disease, 0 = Normal 
+
+
+# Project Goal
+
+The goal of this project is to set up a Machine Learning (ML) model convenient and accurate to predict heart disease based on the attributes available in this data set.
+
+# General Remarks
+
+The essential steps consist in general of the following tasks, which may vary in extent based on the problem and data available:
+
+1. Download / read the data (may be organized in several files and different formats)
+2. Reformat the data in a way to have a structured data set, which then can be transformed into tidy or similar data format
+3. Explanatory Data Analysis to get an impression of the accuracy, limits, content and faulty entries using statistics and graphical representation
+4. Data wrangling, i.e. filter, remove or replace content not usable or not reliable, reshape data or reduce dimension
+5. Split up the data into one ore more training and test sets to check the validity of the selected model(s) or combination of models
+5. Depending on the problem to solve and the type of data (numerical, factors) select at least one ore more ML models to fit the data
+6. Train the model(s) and test on the appropriate data sets
+8. Present the final result (i.e. accuracy, confusion matrix etc.)
+9. Conclusion
+
+It is essential to understand the meaning of the different parameters and their correlations not only on a statistical basis, but in the sense of causality and inference. A good approach has to incorporate reasoning and knowledge of the data. It has to be kept in mind, that the data is not simply a set of numbers to deal with.
+
+# Data Analysis, preprocessing and data wrangling
+
+## Loading the local file
+
+Downloading the file directly from *kaggle* needs the use of user credentials to log in before access to the data is possible. To solve this, the data file is provided with all other files (code, report etc.) required in a .csv format and will be read from the actual directory. The file is named *heart_statlog_cleveland_hungary_final.csv*.
+
+```{r message=FALSE, warning=FALSE, echo = FALSE, results='hide'}
+# read the data file
+htdis_data <- read.csv("heart_statlog_cleveland_hungary_final.csv", header = TRUE, sep = ",")
+```
+
+## General information about the data
+
+A first display during the process of inspection of the data is the printout of the header of the data file. This gives a good overview over the content of the data set with variable (column) names and type of data. Typically a set of six rows is displayed.
+
+```{r message=FALSE, warning=FALSE, echo = FALSE}
+head(htdis_data)
+```
+It can be seen, that all data is numeric (integer, double). Another fast overview can be achieved by using the function *str* (see table below).
+
+```{r message=FALSE, warning=FALSE, echo = FALSE}
+str(htdis_data)
+```
+We can see, that all the data is numeric (*int* or *num*), which may not be convenient to establish a ML model, because some of the variables consist of a few distinctive values, that is categorical or factor values (i.e. no continuous values like *age* or *cholesterol*).
+
+## Detailed data exploration
+
+A detailed exploration of the data available shows missing data, possible inconsistent data and the general data quality, which is essential for all further steps to build a ML model and achieve a good prediction.
+
+This task is usually named as Explanatory Data Analysis (EDA) and is used to show general features of the different variables and also correlations between variables using graphics or statistical values directly. It is also helpful to analyse the distribution of the different variables.
+
+### Missing data
+
+The following table shows the number of missing (non existent = NA) values in each column:
+
+```{r message=FALSE, warning=FALSE, echo = FALSE}
+#check for missing values (N/A) in the columns and display as a table
+
+knitr::kable(colSums(is.na(htdis_data)),col.names = c("Variable","N"), caption = "Missing values")
+
+```
+
+There are no missing values in the data set.
+
+### Reorganization of the data
+
+From the description of the data (see chapter 3), we know, that some of the variables (Columns) contain nominal values, i.e. have to be handled as factors. Before we proceed with the data analysis, the data type will be set appropriate. This affects the following columns (attributes / variables): **sex, chest.pain.type, fasting.blood.sugar, resting.ecg, exercise.angina, ST.slope and target**
+
+The *target* remains as a numerical value, but the new column *case* will be a factor. A simple code below converts the columns mentioned to categorical variables in a new data frame.
+
+```{r message=FALSE, warning=FALSE, echo = FALSE}
+
+# create a new data frame and change variables from numerical to factorial values (i.e. continuous vs. levels), where necessary
+
+htdis_datax <- htdis_data
+htdis_datax$sex <- if_else(htdis_data$sex == 0, "female", "male")
+htdis_datax$sex <- as.factor(htdis_datax$sex)
+htdis_datax$chest.pain.type <- as.factor(htdis_data$chest.pain.type)
+htdis_datax$fasting.blood.sugar <- as.factor(htdis_data$fasting.blood.sugar)
+htdis_datax$resting.ecg <- as.factor(htdis_data$resting.ecg)
+htdis_datax$exercise.angina <- as.factor(htdis_data$exercise.angina)
+htdis_datax$ST.slope <- as.factor(htdis_data$ST.slope)
+
+# keep "target" as numerical and add a new column "case" with class "factor"
+htdis_datax <- htdis_datax %>%
+  mutate( case = as.factor(target))
+
+```
+
+### Data spread and distribution
+
+I choose to use *GridExtra* to arrange the graphics just to have a fast overview with no detailed presentation of the data. The following graphic shows the distributions of the variables to get an impression of the spread and the values of the different variables without distinction whether the variable is continuous or categorical. 
+
+```{r message=FALSE, warning=FALSE, echo = FALSE}
+
+# Function to plot all distributions per column
+plot_distributions <- function(data) {
+  
+  # Initialize an empty list to store plots
+  plot_list <- list()
+  
+  # Loop through all columns in the dataset
+  for (col_name in names(data)) {
+    # Select the column
+    column <- data[[col_name]]
+    
+    # Check the column type
+    if (is.numeric(column)) {
+      # Numeric: Create a histogram
+      plot <- ggplot(data, aes_string(x = col_name)) +
+        geom_histogram(bins = 30, fill = "blue", color = "black") +
+        theme_minimal() +
+        ylim(0,250) +
+        labs(title = paste("Distribution of", col_name), x = col_name, y = "Frequency") +
+        theme(plot.title = element_text(size = 8))
+    } else if (is.factor(column) || is.character(column)) {
+      # Categorical: Create a bar chart
+      plot <- ggplot(data, aes_string(x = col_name)) +
+        geom_bar(fill = "green", color = "black") +
+        theme_minimal() +
+        ylim(0,1000) +
+        labs(title = paste("Distribution of", col_name), x = col_name, y = "Count") +
+        theme(axis.text.x = element_text(hjust = 1)) +
+        theme(plot.title = element_text(size = 8))
+    } else {
+      # Skip unsupported types
+      message(paste("Skipping column:", col_name, "- unsupported type"))
+      next
+    }
+    
+    # Add the plot to the list
+    plot_list[[col_name]] <- plot
+  }
+  # Arrange the plots in a grid and display the results
+  do.call(grid.arrange, c(plot_list, ncol = 3))
+
+}
+
+# Call the function on the dataset
+plot_distributions(htdis_datax %>% select(-target))
+
+```
+
+The graphic displays all categorical data in *green*, all continuous (numerical) data in *blue*. The frequency of the value *0* in the graphic of *oldpeak* can not be displayed, because of the overall y axis limit due to an acceptable representation of the data.
+
+A summary of min, max, mean, standard deviation and median values is presented in a table below the graphics for variables with continuous values only.
+
+It can be seen, that *ST.slope* has four levels, while the data description explains only three levels. Because there is only one *zero* in the data set, I assume this a wrong entry. Because it is unclear, this data will removed from the dataset.
+
+```{r message=FALSE, warning=FALSE, echo = FALSE}
+
+# Removing row with wrong entry in ST.slope
+htdis_datax <- htdis_datax %>%
+  filter(ST.slope != "0")
+
+# compute average, min, max, standard deviation and median for all numerical variables
+# reduce the data set to the numerical data only
+htdis_num <- htdis_datax %>%
+  select(age, resting.bp.s,cholesterol, max.heart.rate, oldpeak)
+
+cn <- colnames(htdis_num)
+
+# calculate the different values for all columns
+ht_avgs <- apply(htdis_num, 2, mean)
+ht_max <- apply(htdis_num, 2, max)
+ht_min <- apply(htdis_num, 2, min)
+ht_median <- apply(htdis_num, 2, median)
+ht_stdev <- apply(htdis_num, 2, sd)
+
+#create a tibble to display the table efficiently
+ht_info <- tibble(cn, ht_min, ht_max, ht_avgs, ht_stdev, ht_median)
+
+# print the different values as a formatted table
+knitr::kable(ht_info, col.names = c("Variable", "min", "max", "average", "sd", "median"), digits = 2, caption = "Continuous Variables: spread, average, standard deviation and median")
+
+# count the zero values in the cholesterol variable
+zero_chol <- htdis_datax %>%
+  filter(cholesterol == 0) %>%
+  count() %>%
+  as.numeric()
+
+```
+
+Several of the variables contain also *zero* values (*resting.bp.s, cholesterol*) or negative values (*oldpeak*). This has to be evaluated in detail and - if not plausible or realistic - replaced or filtered out.
+
+### Inconsistent data and data cleaning/correction
+
+The variable *cholesterol* consists of an amount of *zero* values, which is not explained in the data description. We must assume, that in these cases no information is available, i.e. the value has not been measured. These zero values distort the distribution of cholesterol measurements and have also an influence on any ML model.
+
+The average and median of the *cholesterol* values with and without *zeros* are presented in the table below. They show a significant difference.
+
+```{r message=FALSE, warning=FALSE, echo = FALSE}
+
+# count zero values in cholesterol variable
+chol_zeros <- htdis_datax %>%
+  filter(cholesterol == 0) %>%
+  summarize(n()) %>%
+  as.numeric()
+
+
+# calculate the average cholesterol value without zero values
+avg_chol <- htdis_datax %>%
+  filter(cholesterol > 0) %>%
+  summarize(mean(cholesterol))
+
+# calculate the median cholesterol value without zero values
+med_chol <- htdis_datax %>%
+  filter(cholesterol > 0) %>%
+  summarize(median(cholesterol))
+
+# convert to a numerical value
+avg_chol <- as.numeric(avg_chol)
+med_chol <- as.numeric(med_chol)
+
+# put the data into a matrix that can be displayed using kable
+# create matrix
+xy <- matrix(0,2,3)
+xy[1,1] <- "Zeros included"
+xy[1,2] <- round(ht_avgs[3],1)
+xy[1,3] <- round(ht_median[3],1)
+xy[2,1] <- "Zeros removed"
+xy[2,2] <- round(avg_chol,1)
+xy[2,3] <- round(med_chol,1)
+
+# print the table in an acceptable format
+knitr::kable(xy, col.names = c("Data","Average mg/dl","Median mg/dl"), digits = 2, caption = "Cholesterol average and median")
+
+# calculate the total number of cholesterol values above 450 mg/dL to evaluate a possible influence on the model
+chol_top <- htdis_datax %>%
+  filter(cholesterol > 450) %>%
+  summarize(n())
+
+# print the value without any formatting
+chol_top <- as.numeric(chol_top)
+
+```
+
+In total `r chol_zeros` *zero* values exist in the data set, which represents a proportion of 14.4% of all values. Four possible solutions exist to correct the data:
+
+1. Remove the data sets to avoid a negative influence on the model
+2. Replace all zeros by the average value calculated from non-zero values only
+3. Replace all zeros by the median value calculated from non-zero values only
+4. Replace all zeros by generated values based on a normal distribution calculated from the non-zero values by use of mean and standard deviation
+
+In a first step , option 3 is used, i.e. the zero values are replaced by the median of the cholesterol value calculated without the zeros. It will influence the distribution of the cholesterol values in a way, that the distribution will get narrower as about 15% of the values are set to the average. This is displayed in the next graphic. A replacement with the average (option 2) instead should have the same effect, because average and median differ only by `r round(1-avg_chol/med_chol,3)*100`%.
+
+Option 4 was tested also, but causes a distortion of the distribution of the *colesterol* values, depending on the sample created to replace the values. Option 3 seems to be an acceptable approach.
+
+It can also be seen, that some of the values are far beyond 400 ml/dL, which is far too high according to actual knowledge (see for example [8]). A value above 240 mg/dL gives rise to a high risk of a heart disease, values above 450 mg/dL could be interpreted as outliers and removed. We do not take into account a drop or correction of these very large cholesterol values, because the total number is very small compared to the data set (number of values above 450 mg/dL: `r chol_top`).
+
+```{r message=FALSE, warning=FALSE, echo = FALSE}
+# replacing zeros of cholesterol values with average as calculated above and store in a different data frame
+
+htdis <- htdis_datax %>%
+   mutate(cholesterol = ifelse(cholesterol == 0, med_chol, cholesterol))
+
+# plot the new data distribution of cholesterol values after correction of zeros
+htdis %>%
+  ggplot(aes(cholesterol)) +
+  geom_histogram(fill = "white", color = "blue") +
+  ggtitle("Cholesterol value distribution after correction") +
+  labs(x = "Cholesterol [mg/dl]", y = "Number of occurences")
+
+```
+
+After the correction, we find the average with `r mean(htdis$cholesterol)`, and the median as `r median(htdis$cholesterol)`.
+
+There is only one *zero* value in the variable *resting.bp.s*. The content of this variable is the blood pressure at rest in mm Hg and has to be a positive value. This value is also set to the median of the data set. In this case we can use the median calculated for the full data set, because the influence on the average and median can neglected. 
+
+```{r message=FALSE, warning=FALSE, echo = FALSE}
+
+# count zero values in resting.bp.s variable
+rbps_zeros <- htdis_datax %>%
+  filter(resting.bp.s == 0) %>%
+  summarize(n()) %>%
+  as.numeric()
+
+# replacing the zero of resting.bp.s values with median as calculated above and store in a different data frame
+
+htdis <- htdis %>%
+   mutate(resting.bp.s = ifelse(resting.bp.s == 0, as.numeric(ht_median[2]), resting.bp.s))
+
+# plot the new data distribution of resting.bp.s values after correction of zeros
+htdis %>%
+  ggplot(aes(resting.bp.s)) +
+  geom_histogram(fill = "white", color = "blue") +
+  ggtitle("resting.bp.s value distribution after correction") +
+  labs(x = "resting.bp.s [mm Hg]", y = "Number of occurences")
+
+```
+
+The distribution of the values gives rise to questions. Certain blood pressure values seem to be far more prominent than others. We calculate the frequencies of the top ten occurrences and as shown in the table below.
+
+```{r message=FALSE, warning=FALSE, echo = FALSE}
+
+#calculate the number of the ten top occurrences for blood pressure (variable resting.bp.s)
+top_frq <- htdis %>%
+  group_by(resting.bp.s) %>%
+  summarize(frq = n()) %>%
+  slice_max(order_by = frq, n = 10)
+
+# print the table in an acceptable format
+knitr::kable(top_frq, col.names = c("BP in mm Hg","Frequency"), digits = 0, caption = "Top ten blood pressure values")
+
+```
+
+Nearly 40% of the data belong to a blood pressure of 120, 130 and 140 mm Hg (top three frequencies), followed by 110, 150 and 160. This sums up in total to 663 (56%) entries. It is not clear, if the values are really measured or if the persons tested had to give the result of their private measurement. The trust in the accuracy of the blood pressure data is quite low.
+
+Since the data has a large spread and most of the values are multiples of ten, the variable was as stratified into classes as multiples of 10 to test, if the models improve, but the accuracy was slightly lower. Therefore this approach for *resting.bp.s* is not implemented in this final report.
+
+At this point the data is ready for the application of ML models.
+
+### Correlation of data
+
+To get more insight we check, which variables are correlated. This can easily be done using the appropriate function and visualize the data as shown below assuming the data is numerical and consists of continuous values, i.e. the data as read from the file is used.
+
+```{r message=FALSE, warning=FALSE, echo = FALSE}
+
+# select all columns with numerical values and calculate their correlation
+xx <- htdis %>%
+  select(where(is.numeric)) %>%
+  cor()
+
+# plot the correlation matrix
+ggcorr(xx, label = TRUE, hjust = 0.9, layout.exp = 1) +
+  theme(text = element_text(size = 12), legend.title=element_text(size=10)) +
+  ggtitle("Correlation between variables")
+
+```
+
+The  matrix shows some positive and negative correlations between the *target* and *oldpeak* as well as between *age* and *max.heart.rate*, but most of the data seems to have nearly no correlation.
+
+But the numerical data is only a subgroup of the data set. This has to be taken into account for the choice of the ML model.
+
+### Grouping of variables
+
+As explained in the *Introduction*, the data is composed of sets from different countries, but the information about the origin (i.e. country/region) is omitted and not available. It is not possible to use the origin for grouping. Since the data comes from the US and Europe, this could have an influence due to different cultural behavior.
+
+Thus a first analysis is focused on the influence of gender (i.e. male vs. female), because it is  known, that symptoms of men and women are different with respect to heart disease (see reference [5]).
+
+The dataset consists of `r round(mean(htdis_data$sex),2) * 100`% males and `r round(1-mean(htdis_data$sex),2) * 100`% females.
+
+According to [5] which states "*Sex-specific differences grounded in biology may play a role. The overall prevalence of coronary artery disease is lower in women, and they tend to develop heart problems at older ages (the average age for a first heart attack in men is 65, compared with 72 in women).*", a significant difference in the data for men and women can be expected and also an  influence of the age.
+
+```{r message=FALSE, warning=FALSE, echo = FALSE}
+
+# calculate the number of males and females in the data set 
+gdn <- htdis %>%
+  group_by(sex) %>%
+  count()
+
+# store the total number of males and females in numerical variables for later use
+Nf <- as.numeric(gdn[1,2]) 
+Nm <- as.numeric(gdn[2,2])
+
+# print the table in an acceptable format
+knitr::kable(gdn, col.names = c("Gender","N"), digits = 2, caption = "Number of datsets for males/females")
+
+# generate histogram with age distribution for males and females
+# This plot shows the age distributions separately for a direct comparison
+htdis %>%
+  ggplot() +
+  geom_histogram(aes(age), color = "red", fill = "white", filter(htdis, sex == "male")) +
+  geom_histogram(aes(age), color = "blue", fill = "lightblue", filter(htdis, sex == "female")) +
+  ggtitle("Age distribution of males (red) and females (blue)")
+
+# generate a violin plot to judge differences in age distribution between males and females
+ggplot(htdis, aes(x=sex, y=age, fill=sex)) + geom_violin(alpha = 0.5) +
+  ggtitle("Age distribution of males and females (Violin Plot")
+
+```
+
+From the histograms, it is difficult to judge, if the age distributions of males and females differ. An additional plot (*Violin plot*) helps th see the differences. The portion of males between 50 and 65 years is much higher relative to the total as for females. A direct use of this information is not possible. So it is necessary to calculate the relative numbers (percentage) of males and females.
+
+Because the age distribution of males and females consists of different values over a large scale, the age data is stratified such, that every person is put into a class (called *age_strat*) within a five year interval.
+
+The resulting data is shown below graphically as well as in tabular form.
+
+```{r message=FALSE, warning=FALSE, echo = FALSE}
+
+# calculate the proportional frequency distributions of males and females vs. age
+# by use of a stratification of the age into groups of 5 years
+
+htdis <- htdis %>%
+  mutate(age_strat = factor(round(age/5)*5))
+
+#Generate the data table with information about number an proportion of males/females
+age_prop <- htdis %>%
+  select(sex, age_strat) %>%
+  group_by(age_strat, sex) %>%
+  count() %>%
+  pivot_wider(names_from = sex, values_from = n) %>%
+  mutate(pM = round(100*male/Nm,1), pF = round(100*female/Nf,1))
+
+# generate a graphical representation of the proportion of males and females of the age classes
+age_prop %>%
+  ggplot() +
+  geom_col(aes(age_strat, pM), color = "red", fill = "white", alpha = 0.4) +
+  geom_col(aes(age_strat, pF), color = "blue", fill = "white", alpha = 0.4) +
+  ggtitle("Proportion of males and females vs. age") +
+  labs(x = "Age (stratified)", y = "Proportion in %")
+
+# print the table in an acceptable format
+knitr::kable(age_prop, col.names = c("Age (class)","females", "males", "males %", "females %"), digits = 2, caption = "Age distribution of males/females")
+
+```
+
+Now it can be seen, that the age distribution of males and females differs only slightly by a few percent. We can also assume, that significant differences in the data for males and females is not simply an outcome of completely different samples with respect to the age (e.g. only people above 60 etc.).
+
+```{r message=FALSE, warning=FALSE, echo = FALSE}
+
+# Generate a Histogram of age-related number of cases based on the stratified age classes
+htdis %>%
+  group_by(age_strat, case) %>%
+  summarize(n()) %>%
+  ggplot() +
+  geom_col(aes(age_strat, `n()`, color = case, fill = case), alpha = 0.5) +
+  ggtitle("Age distribution of heart disease")
+
+```
+
+This histogram reveals, that the number of heart disease cases is highest around the age of 60 years (+/- 5 years), that means age seems to be a significant factor for heart disease. On the other hand is the number of persons of that age the highest. The number of disease cases must be weighted with the number of persons of the same age class.
+
+It can be calculated similar to the proportions of males and females in each age class. The outcome of this calculation is shown below.
+
+```{r message=FALSE, warning=FALSE, echo = FALSE}
+
+# The table with stratified age classes is used 
+# Count total number of cases 0 and 1 to calculate proportions
+n_dis <- htdis %>%
+  group_by(case) %>%
+  count()
+  
+# Generate the data table with information about number an proportion of heart disease in total for each group (case)
+dis_prop <- htdis %>%
+  select(case, age_strat) %>%
+  group_by(age_strat, case) %>%
+  count() %>%
+  pivot_wider(names_from = case, values_from = n) %>%
+  mutate(pM = round(100*`0`/(`0`+`1`),1), pF = round(100*`1`/(`0`+`1`),1))
+  #mutate(pM = round(100*`0`/as.numeric(n_dis[1,2]),1), pF = round(100*`1`/as.numeric(n_dis[2,2]),1))
+  
+cn <- c("age_strat" , "Disease", "Normal", "pDisease", "pNormal")
+names(dis_prop) <- cn
+
+# generate a graphical representation of the proportion of peple with disease/normal of the age classes
+dis_prop %>%
+  ggplot() +
+  geom_col(aes(age_strat, pDisease), color = "red", fill = "white", alpha = 0.4) +
+  geom_col(aes(age_strat, pNormal), color = "blue", fill = "white", alpha = 0.4) +
+  ggtitle("Proportion with disease (red) and normal (blue) in each age class") +
+  labs(x = "Age (stratified)", y = "Proportion in %")
+
+# print the table in an acceptable format
+knitr::kable(dis_prop, col.names = c("Age (class)","Disease", "Normal", "Disease %", "Normal %"), digits = 2, caption = "Age distribution of Disease")
+
+```
+
+This result is surprising. The relative proportion of disease cases for the age classes of 55 years and below is higher than for people with or above 60 years. The total number of cases in each age class is also shown in the table above and corresponds with the proportions. It is not possible to explain this based on the data set. Additional information would be necessary to interpret this. For very small numbers of cases (e.g. 13 cases in the 30-year class), the values will not be reliable, since a small number of cases has a high influence on the proportion. No significant influence is seen with respect to a ML model.
+
+
+### Significant patterns
+
+Can we find significant patterns in the data (i.e. clustering etc.)? The first choice is to separate males and females and check relevant attributes. This is done using graphics, because this easily reveals, if data is spread or concentrated in regions of interest. The graphics combine up to four different variables to check for possible clustering or dependencies.
+
+The set of graphics is only presented for combinations of data, which reveal possibly some interesting features/structure and also described in short.
+
+Since cholesterol is an important factor for cardiovascular disease, it is interesting, how the cholesterol values are distributed with respect to additional grouping.
+
+```{r message=FALSE, warning=FALSE, echo = FALSE}
+
+# Generate plot to show the correlation of cholesterol vs. age, split by chest.pain.type
+htdis %>%
+  ggplot(aes(age, cholesterol, color = chest.pain.type)) +
+  geom_point() +
+  facet_wrap(~sex)
+
+```
+
+The graphic above shows the cholesterol values vs. age, grouped by sex and colored by chest.pain.type. Only one significant pattern is visible: the corrected cholesterol values (0 replaced by the median 240) are prominent in the data for males.
+
+```{r message=FALSE, warning=FALSE, echo = FALSE}
+
+# Generate plot to show the correlation of cholesterol vs. age, split by sex and chest.pain.type
+htdis %>%
+  ggplot(aes(age, cholesterol, color = sex)) +
+  geom_point() +
+  facet_wrap(~chest.pain.type)
+
+```
+
+The graphic above shows the cholesterol values vs. age, grouped by chest.pain.type and colored by sex. No significant pattern or correlation is visible.
+
+```{r message=FALSE, warning=FALSE, echo = FALSE}
+
+# Generate plot to show the correlation of max.heart.rate vs. age, split by sex and chest.pain.type
+htdis %>%
+  ggplot(aes(age, max.heart.rate, color = chest.pain.type)) +
+  geom_point() +
+  facet_wrap(~sex)
+
+```
+
+From the graphic above (max.heart.rate vs. age, grouped by sex and colored by chest.pain.type), it can be seen, that the type of chest pain is related to the maximum heart beat rate. Type 4 (asymptomatic) seems to be more often, when the max. heart beat rate is lower than 150 per minute. A similar picture can be generated with the variable *ST.slope* instead of *chest.pain.type*. In that case, the lower maximum heart beat rate is connected with *ST.slope = 2*, which is not a negative sign (see below). It can also be seen, that *ST.slope = 1* and *ST.slope = 2* dominate.
+
+```{r message=FALSE, warning=FALSE, echo = FALSE}
+
+# Generate plot to show the correlation of max.heart.rate vs. age, split by sex and chest.pain.type
+htdis %>%
+  ggplot(aes(age, max.heart.rate, color = ST.slope)) +
+  geom_point() +
+  facet_wrap(~sex)
+
+```
+
+In case of a heart disease, not only chest pain, but also a feeling of heavy breathing, called angina often occurs. In data set consists also of a value called *exercise.angina*, which means, that the person encounters angina symptoms induced by exercise. It is surely of interest, if there is some pattern in the data, which is shown in the following graphic.
+
+```{r message=FALSE, warning=FALSE, echo = FALSE}
+
+# Generate plot to show the correlation of max.heart.rate vs. age, split by sex and exercise.angina
+htdis %>%
+  ggplot(aes(age, max.heart.rate, color = exercise.angina)) +
+  geom_point() +
+  facet_wrap(~sex)
+
+```
+
+In the graphic above the *max.heart.rate* is displayed vs. *age*, grouped by *sex* and the value of *exercise.angina*. A lower *max.heart.rate* corresponds to *exercise.angina* symptoms.
+
+The next graphic shows the *max.heart.rate* vs. *age* grouped by *sex* and *case*. For males, the two cases reveal the same characteristics like the graphics above with *exercise.angina*, *ST.slope* and *chest.pain.type*. Two slightly separated regions with a "center of mass" at lower *age* (about 45) and higher *max.heart.rate* (about 150), while the other group is centered at an *age* of about 55 and *max.heart.rate* of about 120. This behavior can not bee seen in the data for females, but this could be due to the fact, that less data is available. 
+
+```{r message=FALSE, warning=FALSE, echo = FALSE}
+
+# Generate plot to show the correlation of max.heart.rate vs. age, split by sex and case
+htdis %>%
+  ggplot(aes(age, max.heart.rate, color = case)) +
+  geom_point() +
+  facet_wrap(~sex) +
+  ggtitle("Max. heart rate vs. disease grouped by sex")
+
+```
+
+The next plot shows the distribution of cases for males and females together with the *cholesterol* value and the *age*. The plot reveals no new insights. Heart disease occurs more often at higher ages, while the cholesterol shows no significant change with age.
+
+```{r message=FALSE, warning=FALSE, echo = FALSE}
+
+# generate plot of cholesterol vs. age grouped by sex and case values
+htdis %>%
+  ggplot(aes(age, cholesterol, color = case)) +
+  geom_point() +
+  facet_wrap(~sex) +
+  ggtitle("Cholesterol vs. disease for males & females")
+
+```
+
+The next two plots show the occurrences of *exercise.angina* in combination with *chest.pain.type* with absolute values (number of persons) and the relative amount, separated for males and females.
+
+```{r message=FALSE, warning=FALSE, echo = FALSE}
+
+# Generate a data frame to display the relative number of men and women  for exercise.angina and chest.pain.type
+group1 <- htdis %>%
+  group_by(sex, exercise.angina, chest.pain.type) %>%
+  summarize(Number = n()) %>%
+  mutate(Percent = ifelse(sex == "female", round(100*Number/Nf,1), round(100*Number/Nm,1)))
+
+# check if the Sum equals 100 % (only used during model development)
+# group1 %>%
+# group_by(sex) %>%
+#   summarize(sum(Percent))
+
+# plot a graphic with percentage of men and Women for *exercise.angina and chest.pain.type*
+# the size of the circles represents the percentage of occurrence in that group
+group1 %>%
+  ggplot(aes(exercise.angina, chest.pain.type, color = sex, size = Percent)) +
+  geom_point(shape = 1) +
+  ggtitle("Chest pain and exercise - Relative number of occurences") +
+  labs(x = "Exercise induced angina", y = "Chest pain type")
+
+# plot a similar graphic with the absolute number of persons
+group1 %>%
+  ggplot(aes(exercise.angina, chest.pain.type, color = sex, size = Number)) +
+  geom_point(shape = 1) +
+  ggtitle("Chest pain and exercise - Absolute number of occurences") +
+  labs(x = "Exercise induced angina", y = "Chest pain type")
+
+```
+
+From the graphics above we can deduce the following information:
+
+1. Most of the persons (men and women) had no *exercise.angina*, but had also different angina symptoms (i.e. *chest.pain.type = 1 or 2*)
+2. The most *chest.pain.type = 4* occures in combination *exercise.angina = 1* 
+3. The graphic with the relative number of different symptoms suggests, that no female in the data set encounters a *chest.pain.type = 4* while *exercise.angina = 0*, but this is not true as the graphic with the absolute values shows. In this case, the percentage is nearly identical (see table), which may result in a complete overlay of the two values (male / female).
+
+*Conclusion*: Graphics should also be checked for consistency and possibly misleading depiction.
+
+In summary, the data shows some characteristics based on variables with nominal values. The continuous variables reveal no strong correlations as suggested by the correlation matrix in chapter 6.3.5.
+
+
+# Methods applied
+
+The first step here is to generate the data sets for training and testing. This is done using the *caret* library. AS a starting point the training set consists of 80% of the data, while the test set consists of the remaining 20%.
+
+The columns *target* and *age* will be removed
+
+## Preparation of train and test sets
+
+```{r message=FALSE, warning=FALSE, echo = FALSE}
+# set the start (seed) value for the generation of random samples to get reproducible and comparable results
+
+set.seed(1643) # Birth year of Isaac Newton :-)
+
+# remove the column "target" from the data set because the goal is to predict case
+# target is numerical, but case a factor variable created from target
+# the variable age is also removed, while age_strat is used instead
+htdis <- htdis %>%
+  select(-target, -age)
+
+# splitting up the data into training and test sets using the caret library
+test_idx <- createDataPartition(htdis$case, times = 1, p = 0.2, list = FALSE)
+ht_test <- htdis[test_idx,]
+ht_train <- htdis[-test_idx,]
+
+```
+
+## Model building
+
+As described above the data set consists of continuous and categorical variables. The question is, what model could be used to establish an acceptable prediction of heart disease (i.e. the value of target / case). In the following sections, this will be described and tested with various approaches.
+
+The *caret* library provides the function *train* to use different algorithms in a simple and efficient way and will be used as described below to test several models for the prediction of heart disease. But in a first step we will check the power of a prediction by random sampling.
+
+The performance of the models will be compared using the accuracy.
+
+### Simple statistical model (guessing)
+
+From the data exploration it can be seen, that the number of heart disease cases is nearly 50% of all cases. What accuracy can a guess with 50% chance get? The result is given below and as expected a nearly 50% accuracy is reached.
+
+```{r message=FALSE, warning=FALSE, echo = FALSE}
+
+# generate samples based on a 50% chance for "0" and "1" with appropriate length of the data sets
+p1_case <- as.factor(sample(c("0","1"), size = dim(ht_train)[1], replace = TRUE))
+p2_case <- as.factor(sample(c("0","1"), size = dim(ht_test)[1], replace = TRUE))
+
+# Calculate the confusion matrices for both sets based on the predictions
+result1 <- confusionMatrix(p1_case, ht_train$case)
+result2 <- confusionMatrix(p2_case, ht_test$case)
+
+```
+
+In this very simple (and stupid) approach, the accuracy gained for the train set is `r result1$overall[["Accuracy"]]` and `r result2$overall[["Accuracy"]]` for the test set. This result is of course not acceptable for a ML model.
+
+```{r message=FALSE, warning=FALSE, echo = FALSE}
+
+# generate a results table as tibble to display accurately
+all_acc <- tibble(Method = "Guessing", Accuracy = result2$overall[["Accuracy"]])
+
+# display table with results from guessing
+knitr::kable(all_acc, col.names = c("Method","Accuracy"), digits = 3, caption = "Accuracy of the model")
+
+```
+
+
+### Linear combination of variables (glm)
+
+Since no strong correlations between the continuous variables exist, it is not expected, that a generalized linear model will give a high accuracy. 
+
+```{r message=FALSE, warning=FALSE, echo = FALSE}
+
+train_glm <- train(case ~ ., method = "glm", data = ht_train)
+p_glm <- predict(train_glm, ht_test, type = "raw")
+
+# Calculate the accuracy of the model with respect to the test set
+acc_glm <- confusionMatrix(p_glm,ht_test$case)$overall[["Accuracy"]]
+
+all_acc <- bind_rows(all_acc, tibble(Method="Linear Combination (glm)", Accuracy = acc_glm))
+
+# display table with results from guessing
+knitr::kable(tibble(Method="Linear Combination (glm)", Accuracy = acc_glm),
+      col.names = c("Method","Accuracy"), digits = 3, caption = "Accuracy of the model")
+```
+
+The result is a little bit surprising, but gives at least an accuracy of 84 percent.
+
+
+### k-Nearest Neighbors
+
+Based on the fact, that most of the attributes are categorical, we could assume that an algorithm based on the neighborhood of the data in a multi-dimensional space would lead to a high accuracy. This expectation has not come to real. The facts show, that this approach leads to a relatively low accuracy in data prediction, as shown in the table below compiled of the data of the prediction models used.
+
+The *train* function can in this case be used with a tuning parameter $k$. The influence of the tuning parameter and its optimal value is shown in the graphic below.
+
+```{r message=FALSE, warning=FALSE, echo = FALSE}
+
+# train a k-Nearest Neighbor model based on the caret library
+
+train_knn <- train(case ~ ., method = "knn", data = ht_train, tuneGrid = data.frame(k = seq(3, 150, 2)))
+p_knn <- predict(train_knn, ht_test, type = "raw")
+
+# Calculate the accuracy of the model with respect to the test set
+acc_knn <- confusionMatrix(p_knn,ht_test$case)$overall[["Accuracy"]]
+
+ggplot(train_knn, highlight = TRUE) +
+  labs(x = "Tuning parameter k = # of Neighbors", "Accuracy (with bootstrapping)")
+
+all_acc <- bind_rows(all_acc, tibble(Method="k-Nearest neighbors", Accuracy = acc_knn ))
+
+# display table with results from k-Nearest Neighbours
+knitr::kable(tibble(Method="Linear Combination", Accuracy = acc_knn),
+      col.names = c("Method","Accuracy"), digits = 3, caption = "Accuracy of the model")
+```
+
+The resulting accuracy is very low and even below the *GLM* model.
+
+### GAM loess
+
+According to the course material [3], this algorithm should perform similar to the kNN model. Here, also a tuning parameter could set, but in this case we just let the function give the best value.
+
+This algorithm is a *General Additive Model (GAM)* similar to the *Generalized Linear Models (GLM)* using the *LOESS* algorithm for regression.
+
+```{r message=FALSE, warning=FALSE, echo = FALSE}
+
+# train a GAM Loess model based on the caret library
+
+train_loess <- train(case ~ ., method = "gamLoess", data = ht_train)
+p_loess <- predict(train_loess, ht_test, type = "raw")
+
+# Calculate the accuracy of the model with respect to the test set
+acc_loess <- confusionMatrix(p_loess,ht_test$case)$overall[["Accuracy"]]
+
+# add entry to the complete table of results
+all_acc <- bind_rows(all_acc, tibble(Method="GAM Loess", Accuracy = acc_loess))
+
+# display table with results from GAM Loess
+knitr::kable(tibble(Method="GAM Loess", Accuracy = acc_loess),
+      col.names = c("Method","Accuracy"), digits = 3, caption = "Accuracy of the model")
+```
+
+
+### Random Forest
+
+Because the results so far are not satisfying, a Random Forest model (with algorithm *cforest*) will be used. This is a generalized approach based on the principles of a decision tree.
+
+Here, we do not use the tuning parameter, but relay in the first step on the optimization strategy of the algorithm.
+
+```{r message=FALSE, warning=FALSE, echo = FALSE}
+
+# train a Random Forest model based on the caret library
+
+train_rf <- train(case ~ ., method = "cforest", data = ht_train)
+p_rf <- predict(train_rf, ht_test, type = "raw")
+
+# Calculate the accuracy of the model with respect to the test set
+acc_rf <- confusionMatrix(p_rf,ht_test$case)$overall[["Accuracy"]]
+
+# Generate entry in the results table
+all_acc <- bind_rows(all_acc, tibble(Method="Random Forest (cforest)", Accuracy = acc_rf))
+
+# display table with results from Random Forest model
+knitr::kable(tibble(Method="Random Forest (cforest)", Accuracy = acc_rf),
+      col.names = c("Method","Accuracy"), digits = 3, caption = "Accuracy of the model")
+
+```
+
+### Random Forest with Tuning Parameters
+
+It is also possible to use the library *randomForest* directly to train a model instead of using the *caret* function *train*. This is done also and the result using the tuning parameter *mtry* is given below. An additional improvement of the model was achieved by adapting the parameter *ntree* and using the algorithm *rf*.
+
+```{r message=FALSE, warning=FALSE, echo = FALSE}
+
+# setting up the parameters to train the Random Forest model with optimized parameters
+x <- ht_train %>%
+  select(-case)
+y <- ht_train %>%
+  select(case) %>%
+  as.matrix()
+
+# set tuning parameters
+control <- trainControl(method="cv", number = 5)
+grid <- data.frame(mtry = c(1, 3, 5, 7, 10, 25, 50, 100))
+
+train_rf2 <- train(x, y,
+  method = "rf",
+  ntree = 185,
+  trControl = control,
+  tuneGrid = grid,
+  nSamp = 5000)
+
+# plot the accurcy vs. tuning parameter mtry
+ggplot(train_rf2, highlight = TRUE) +
+  ggtitle("Optimal Tuning Parameter mtry for Random Forest")
+
+# train_rf2$bestTune
+
+yh_rf <- predict(train_rf2, ht_test, type = "raw")
+acc_rf2 <- confusionMatrix(yh_rf, ht_test$case)$overall["Accuracy"]
+
+all_acc <- bind_rows(all_acc, tibble(Method="Random Forest Optimized", Accuracy = acc_rf2))
+
+# display table with results from Random Forest Optimized
+knitr::kable(tibble(Method="Random Forest Optimized", Accuracy = acc_rf2),
+      col.names = c("Method","Accuracy"), digits = 3, caption = "Accuracy of the model")
+
+
+```
+
+# Final Result
+
+The table below lists all models used at this point with their accuracy. We can see, that the best model so far is generated using *Random Forest Optimized*, which seems to be reasonable due to a large amount of categorical data in the data set. I tested also possible improvements by combining models, but none of the combinations reached the accuracy of the last *Random Forest Optimized* model.
+
+```{r message=FALSE, warning=FALSE, echo = FALSE}
+
+# sort the table with descending RMSE
+all_acc <- all_acc %>% arrange(Accuracy)
+
+# print the table of the accuracy of the models in an acceptable format
+knitr::kable(all_acc, col.names = c("Method","Accuracy"), digits = 3, caption = "Comparison of the models")
+
+```
+
+
+# Conclusion
+
+The prediction of heart disease based on the data available in this data set is investigated by use of different models. The accuracy for prediction is best approached by a Random Forest model with accuracy of 0.91 and 0.86 respectively, while a generalized linear model reaches an accuracy of 0.84, which is about 8% less than the best model.
+
+Since a lot of questions arised with respect to the data quality, the result seems quite acceptable.
+
+
+# References and Acknowledgements
+
+1. R Core Team (2023). _R: A Language and Environment for Statistical Computing_. R Foundation for Statistical Computing, Vienna, Austria.
+  <https://www.R-project.org/>
+  
+2. RStudio 2024.09.1+394 "Cranberry Hibiscus" Release (a1fe401fc08c232d470278d1bc362d05d79753d9, 2024-11-03) for windows, Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) RStudio/2024.09.1+394 Chrome/124.0.6367.243 Electron/30.4.0 Safari/537.36, Quarto 1.5.57
+
+3.    Introduction to Data Science, Rafael A. Irizarry
+    https://rafalab.github.io/dsbook/
+
+4. Statistics for Data Scientists, Maurits Kaptein & Edwin van den Heuvel
+    Verlag Springer, 2022
+    https://doi.org/10.1007/978-3-030-10531-0
+
+5.  The heart disease gender gap, September 1, 2022  
+    https://www.health.harvard.edu/heart-health/the-heart-disease-gender-gap
+    
+6.  Angina pectoris (in German)
+    https://de.wikipedia.org/wiki/Angina_pectoris
+
+7.  Angina: Symptoms, diagnosis and treatments, September 21, 2021  
+    https://www.health.harvard.edu/heart-health/angina-symptoms-diagnosis-and-treatments
+
+8.  Cholesterol Levels, Cleveland Clinic (July 2022)
+    https://my.clevelandclinic.org/health/articles/11920-cholesterol-numbers-what-do-they-mean
+    
